@@ -17,6 +17,7 @@ module XRay
           pool, conn = get_pool_n_conn(payload[:connection_id])
 
           return if IGNORE_OPS.include?(payload[:name]) || pool.nil? || conn.nil?
+
           # The spec notation is Rails < 6.1, later this can be found in the db_config
           db_config = if pool.respond_to?(:spec)
                         pool.spec.config
@@ -29,19 +30,24 @@ module XRay
           binds = ''
           sensitive = Set.new(%w[email password])
           unless (payload[:binds] || []).empty?
-            binds = payload[:binds].map { |col, val|
-              filtered = sensitive.include?(col) ? '[FILTERED]' : col.binary? ? '[BINARY DATA]' : val
+            binds = payload[:binds].map do |col, val|
+              filtered = if sensitive.include?(col)
+                           '[FILTERED]'
+                         else
+                           col.binary? ? '[BINARY DATA]' : val
+                         end
               col ? [col, filtered] : [nil, filtered]
-            }.inspect
+            end.inspect
           end
           sql[:sanitized_query] = "#{query} #{binds}"
 
           subsegment = XRay.recorder.begin_subsegment name, namespace: 'remote'
           # subsegment is nil in case of context missing
           return if subsegment.nil?
-          subsegment.start_time = transaction.time.to_f
+
+          subsegment.start_time = transaction.time.to_f / 1000
           subsegment.sql = sql
-          XRay.recorder.end_subsegment end_time: transaction.end.to_f
+          XRay.recorder.end_subsegment end_time: transaction.end.to_f / 1000
         end
 
         private
@@ -65,7 +71,8 @@ module XRay
         end
 
         def get_pool_n_conn(conn_id)
-          pool, conn = nil, nil
+          pool = nil
+          conn = nil
           ::ActiveRecord::Base.connection_handler.connection_pool_list.each do |p|
             conn = p.connections.select { |c| c.object_id == conn_id }
             pool = p unless conn.nil?
