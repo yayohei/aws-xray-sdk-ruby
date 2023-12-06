@@ -26,20 +26,7 @@ module XRay
                       end
           name, sql = build_name_sql_meta config: db_config, conn: conn
 
-          query = payload[:sql].squeeze(' ')
-          binds = ''
-          sensitive = Set.new(%w[email password])
-          unless (payload[:binds] || []).empty?
-            binds = payload[:binds].map do |col, val|
-              filtered = if sensitive.include?(col)
-                           '[FILTERED]'
-                         else
-                           col.binary? ? '[BINARY DATA]' : val
-                         end
-              col ? [col, filtered] : [nil, filtered]
-            end.inspect
-          end
-          sql[:sanitized_query] = "#{query} #{binds}"
+          sql[:sanitized_query] = payload[:sql]
 
           subsegment = XRay.recorder.begin_subsegment name, namespace: 'remote'
           # subsegment is nil in case of context missing
